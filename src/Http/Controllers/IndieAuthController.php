@@ -81,7 +81,7 @@ class IndieAuthController
     {
         $request->validate([
             'scope' => 'array',
-            'scope.*' => 'in:create,update,delete,media,read,follow,channels,mute,block',
+            'scope.*' => 'in:'.implode(',', static::SCOPES),
         ]);
 
         $code = Str::random(64);
