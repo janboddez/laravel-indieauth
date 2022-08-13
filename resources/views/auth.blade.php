@@ -10,7 +10,7 @@
     <style>
     body,
     html {
-        height: 100%;
+        min-height: 100%;
     }
 
     body,
@@ -34,6 +34,11 @@
         width: 90%;
         max-width: 700px;
     }
+
+    .client-icon {
+        position: relative;
+        top: 0.125rem;
+    }
     </style>
 </head>
 <body>
@@ -51,7 +56,20 @@
                 </div>
             @endif
 
-            <p>{{ __('You are attempting to log in with client :client_id.', ['client_id' => session('client_id')]) }}</p>
+            @php
+                $client_description = session('client_id');
+
+                if (! empty($client['name'])) {
+                    $client_description = trim($client['name']);
+                }
+
+                if (! empty($client['icon'])) {
+                    /** @todo: Run through proxy or otherwise verify this is a valid image. */
+                    $client_description = '<img class="client-icon" src="'.$client['icon'].'" height="16"> '.$client_description;
+                }
+            @endphp
+
+            <p>{!! __('You are attempting to log in with :client_description.', ['client_description' => $client_description]) !!}</p>
 
             @if (! empty($scopes))
                 <p>{{ __('It is requesting the following scopes:') }}</p>

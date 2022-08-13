@@ -6,7 +6,9 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use Symfony\Component\DomCrawler\Crawler;
 
 class IndieAuthController
 {
@@ -59,13 +61,14 @@ class IndieAuthController
 
         // $client = Cache::get("indieauth:client:$clientId", function () use ($clientId) {
         //     $client = static::discoverClientData($clientId);
-        //
+
         //     if ($client) {
         //         Cache::set("indieauth:client:$clientId", $client, 86400); // Cache for 24 hours.
         //     }
-        //
+
         //     return $client;
-        // }
+        // });
+        $client = static::discoverClientData($clientId);
 
         session([
             'client_id' => $clientId, /** @todo: Store more than just the ID, to add to token meta. */
@@ -74,7 +77,7 @@ class IndieAuthController
             'code_challenge' => $request->input('code_challenge'), // May be null.
         ]);
 
-        return view('indieauth::auth', compact('scopes'));
+        return view('indieauth::auth', compact('scopes', 'client'));
     }
 
     public function approve(Request $request)
@@ -114,7 +117,8 @@ class IndieAuthController
 
         $code = preg_replace('/[^A-Za-z0-9]/', '', $request->input('code'));
 
-        abort_unless($codeData = Cache::get("indieauth:code:$code"), 403, __('Unknown authorization code.'));
+        // `Cache::pull()` would mean a code can only be used once.
+        abort_unless($codeData = Cache::pull("indieauth:code:$code"), 403, __('Unknown authorization code.'));
 
         if ($request->has('code_verifier')) {
             abort_unless(
@@ -152,7 +156,8 @@ class IndieAuthController
 
         $code = preg_replace('/[^A-Za-z0-9]/', '', $request->input('code'));
 
-        abort_unless($codeData = Cache::get("indieauth:code:$code"), 403, __('Unknown authorization code.')); // Why would this fail even when `$codeData` is obviously NOT empty?
+        // `Cache::pull()` would mean a code can only be used once.
+        abort_unless($codeData = Cache::pull("indieauth:code:$code"), 403, __('Unknown authorization code.'));
 
         abort_unless($request->input('client_id') === $codeData['client_id'], 400, __('Invalid client ID.'));
         abort_unless($request->input('redirect_uri') === $codeData['redirect_uri'], 400, __('Invalid redirect URI.'));
@@ -256,9 +261,30 @@ class IndieAuthController
         return rtrim(strtr(base64_encode($string), '+/', '-_'), '=');
     }
 
-    public static function discoverClientData(string $url): array
+    public static function discoverClientData(string $url): ?array
     {
-        /** @todo: Actually implement. */
-        return [];
+        /** @todo: Use `file_get_contents()`, or Guzzle, so that we can enable redirects. */
+        $response = Http::get($url);
+
+        if (! $response->successful()) {
+            \Log::warning('Could not fetch IndieAuth client data.');
+            return null;
+        }
+
+        /** @todo: Look for a `manifest.json` first. */
+        $crawler = new Crawler($response->body());
+
+        return array_filter([
+            'name' => $crawler->filterXPath('//title')->text(null),
+            /**
+             * @todo: Download/resize/cache this icon, or run it through a "proxy" on output.
+             *
+             * Like, this is likely an ICO file or something. And attempt to grab a larger filesize, if available.
+             */
+            'icon' => filter_var(\Mf2\resolveUrl(
+                $url,
+                $crawler->filterXPath('//link[@rel="icon" or @rel="shortcut icon"]')->attr('href'),
+            ), FILTER_VALIDATE_URL),
+        ]);
     }
 }
