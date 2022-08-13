@@ -1,0 +1,26 @@
+{
+    "name": "janboddez/laravel-indieauth",
+    "description": "IndieAuth server for Laravel",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "janboddez\\IndieAuth\\": "src/"
+        }
+    },
+    "require": {
+        "php": "^7.3|^8",
+        "illuminate/http": "^8|^9",
+        "illuminate/support": "^8|^9",
+        "laravel/sanctum": "^2|^3"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "janboddez\\IndieAuth\\IndieAuthServiceProvider"
+            ]
+        },
+        "branch-alias": {
+            "dev-master": "1.0-dev"
+        }
+    }
+}
