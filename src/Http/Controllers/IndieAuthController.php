@@ -110,8 +110,6 @@ class IndieAuthController
 
     public function verifyAuthorizationCode(Request $request)
     {
-        \Log::debug('Verifying auth code');
-
         abort_unless($request->filled('code'), 401, __('Missing authorization code.'));
 
         $code = preg_replace('/[^A-Za-z0-9]/', '', $request->input('code'));
@@ -148,8 +146,6 @@ class IndieAuthController
 
     public function issueToken(Request $request)
     {
-        \Log::debug('Issuing token');
-
         abort_unless($request->filled('client_id'), 400, __('Missing client ID.'));
         abort_unless($request->filled('redirect_uri'), 400, __('Missing redirect URI.'));
         abort_unless($request->filled('code'), 401, __('Missing authorization code.'));
