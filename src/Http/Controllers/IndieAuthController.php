@@ -6,9 +6,8 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
-use Symfony\Component\DomCrawler\Crawler;
+use janboddez\IndieAuth\ClientDiscovery;
 
 class IndieAuthController
 {
@@ -59,16 +58,17 @@ class IndieAuthController
         /** @todo: Normalize URL? */
         $clientId = $request->input('client_id');
 
-        // $client = Cache::get("indieauth:client:$clientId", function () use ($clientId) {
-        //     $client = static::discoverClientData($clientId);
+        $client = Cache::get("indieauth:client:$clientId", function () use ($clientId) {
+            $client = ClientDiscovery::discoverClientData($clientId);
 
-        //     if ($client) {
-        //         Cache::set("indieauth:client:$clientId", $client, 86400); // Cache for 24 hours.
-        //     }
+            if ($client) {
+                Cache::set("indieauth:client:$clientId", $client, 86400); // Cache for 24 hours.
+            }
 
-        //     return $client;
-        // });
-        $client = static::discoverClientData($clientId);
+            return $client;
+        });
+
+        \Log::debug($client);
 
         session([
             'client_id' => $clientId, /** @todo: Store more than just the ID, to add to token meta. */
@@ -259,32 +259,5 @@ class IndieAuthController
     public static function base64UrlEncode(string $string): string
     {
         return rtrim(strtr(base64_encode($string), '+/', '-_'), '=');
-    }
-
-    public static function discoverClientData(string $url): ?array
-    {
-        /** @todo: Use `file_get_contents()`, or Guzzle, so that we can enable redirects. */
-        $response = Http::get($url);
-
-        if (! $response->successful()) {
-            \Log::warning('Could not fetch IndieAuth client data.');
-            return null;
-        }
-
-        /** @todo: Look for a `manifest.json` first. */
-        $crawler = new Crawler($response->body());
-
-        return array_filter([
-            'name' => $crawler->filterXPath('//title')->text(null),
-            /**
-             * @todo: Download/resize/cache this icon, or run it through a "proxy" on output.
-             *
-             * Like, this is likely an ICO file or something. And attempt to grab a larger filesize, if available.
-             */
-            'icon' => filter_var(\Mf2\resolveUrl(
-                $url,
-                $crawler->filterXPath('//link[@rel="icon" or @rel="shortcut icon"]')->attr('href'),
-            ), FILTER_VALIDATE_URL),
-        ]);
     }
 }

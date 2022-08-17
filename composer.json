@@ -12,6 +12,8 @@
         "illuminate/http": "^8|^9",
         "illuminate/support": "^8|^9",
         "laravel/sanctum": "^2|^3",
+        "guzzlehttp/guzzle": "^7.0",
+        "masterminds/html5": "^2.0",
         "mf2/mf2": "^0.5",
         "symfony/dom-crawler": "^5.4"
     },
