@@ -19,3 +19,8 @@ Finally, for IndieAuth clients to be able to use your (token) endpoint, add the 
 <link rel="authorization_endpoint" href="/indieauth">
 <link rel="token_endpoint" href="/indieauth/token">
 ```
+
+## Sanctum
+This package uses [Laravel Sanctum](https://laravel.com/docs/9.x/sanctum) to issue and verify tokens. By default, tokens never expire. It is, however, possible to [define an expiration time](https://laravel.com/docs/9.x/sanctum#token-expiration).
+
+Tokens can be revoked simply by sending a POST request to `/token/revocation`, using the token (i.e., as a bearer token in an authorization header) you wish to revoke.
