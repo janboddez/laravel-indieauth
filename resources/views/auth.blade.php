@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="{{ app()->getLocale() }}">
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
 <head>
     <meta charset="utf-8">
     <title>{{ config('app.name') }}</title>
@@ -45,7 +45,7 @@
         position: relative;
         top: 0.125rem;
     }
-    
+
     button[type="submit"] {
            -moz-appearance: none;
         -webkit-appearance: none;
