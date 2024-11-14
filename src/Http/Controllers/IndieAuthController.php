@@ -11,7 +11,7 @@ use janboddez\IndieAuth\ClientDiscovery;
 
 class IndieAuthController
 {
-    const SCOPES = [
+    protected const SCOPES = [
         'profile',
         'email',
         'create',
@@ -82,16 +82,47 @@ class IndieAuthController
 
     public function approve(Request $request)
     {
-        $request->validate([
-            'scope' => 'array',
-            'scope.*' => 'in:'.implode(',', static::SCOPES),
+        if ($request->filled('code')) {
+            // So, IndieLogin.com, too, will try to POST to this endpoint. Which is why we can't just use Laravel's web
+            // nor auth middlewares.
+            $code = preg_replace('/[^A-Za-z0-9]/', '', $request->input('code'));
+            abort_unless($codeData = Cache::pull("indieauth:code:$code"), 403, __('Unknown authorization code.'));
+
+            if ($request->has('code_verifier')) {
+                abort_unless(
+                    static::isValidCode($request->input('code_verifier'), $codeData['code_challenge']),
+                    419,
+                    __('PKCE validation failed.')
+                );
+            }
+
+            /** @todo Verify `client_id` and `redirect_uri`. */
+            $user = User::findOrFail($codeData['user_id']);
+
+            $response = ['me' => $user->url];
+
+            if (in_array('profile', (array) $codeData['scope'], true)) {
+                $response['profile'] = array_filter([
+                    'name' => $user->name,
+                    'url' => $user->url,
+                    'photo' => null,
+                    'email' => in_array('email', (array) $codeData['scope'], true) ? $user->email : null,
+                ]);
+            } elseif (in_array('email', (array) $codeData['scope'], true)) {
+                $response['email'] = [
+                    'email' => $user->email,
+                ];
+            }
+
+            return response()->json($response);
+        }
+
+        $validated = $request->validate([
+            'scope' => 'nullable|array',
+            'scope.*' => 'in:' . implode(',', static::SCOPES),
         ]);
 
         $code = Str::random(64);
-
-        $scopes = is_array($request->input('scope'))
-            ? $request->input('scope')
-            : [];
 
         // Using the code as key, and tying the client to it.
         Cache::put("indieauth:code:$code", [
@@ -99,7 +130,7 @@ class IndieAuthController
             'client_id' => session('client_id'),
             'redirect_uri' => session('redirect_uri'),
             'code_challenge' => session('code_challenge'),
-            'scope' => $scopes,
+            'scope' => $validated['scope'] ?? [],
         ], 300);
 
         $callbackUrl = Request::create(session('redirect_uri'))
@@ -233,7 +264,7 @@ class IndieAuthController
             ->delete();
 
         return response()
-            ->json(new \stdClass, 200);
+            ->json(new \stdClass(), 200);
     }
 
     public function metadata()
