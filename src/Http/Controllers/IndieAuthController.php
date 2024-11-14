@@ -80,42 +80,24 @@ class IndieAuthController
         return view('indieauth::auth', compact('scopes', 'client'));
     }
 
+    /**
+     * This method can be called either on submission of the authorization form, or by an IndieAuth client trying to
+     * exchange an authorization code for a profile URL (and somehow not using the token endpoint to do so).
+     *
+     * Unfortunately, this means the default CSRF middleware and `auth` middleware groups must be used only when no
+     * `code` query string parameter is present.
+     */
     public function approve(Request $request)
     {
         if ($request->filled('code')) {
-            // So, IndieLogin.com, too, will try to POST to this endpoint. Which is why we can't just use Laravel's web
-            // nor auth middlewares.
-            $code = preg_replace('/[^A-Za-z0-9]/', '', $request->input('code'));
-            abort_unless($codeData = Cache::pull("indieauth:code:$code"), 403, __('Unknown authorization code.'));
-
-            if ($request->has('code_verifier')) {
-                abort_unless(
-                    static::isValidCode($request->input('code_verifier'), $codeData['code_challenge']),
-                    419,
-                    __('PKCE validation failed.')
-                );
-            }
-
-            /** @todo Verify `client_id` and `redirect_uri`. */
-            $user = User::findOrFail($codeData['user_id']);
-
-            $response = ['me' => $user->url];
-
-            if (in_array('profile', (array) $codeData['scope'], true)) {
-                $response['profile'] = array_filter([
-                    'name' => $user->name,
-                    'url' => $user->url,
-                    'photo' => null,
-                    'email' => in_array('email', (array) $codeData['scope'], true) ? $user->email : null,
-                ]);
-            } elseif (in_array('email', (array) $codeData['scope'], true)) {
-                $response['email'] = [
-                    'email' => $user->email,
-                ];
-            }
+            $response = static::generateResponse($request)[0];
 
             return response()->json($response);
         }
+
+        // In all other cases, assume this is the auth form being submitted. You'll want to make sure CSRF protection is
+        // in place.
+        abort_unless(Auth::check(), 403, __('Forbidden.'));
 
         $validated = $request->validate([
             'scope' => 'nullable|array',
@@ -144,86 +126,20 @@ class IndieAuthController
 
     public function verifyAuthorizationCode(Request $request)
     {
-        abort_unless($request->filled('code'), 401, __('Missing authorization code.'));
-
-        $code = preg_replace('/[^A-Za-z0-9]/', '', $request->input('code'));
-
-        // `Cache::pull()` would mean a code can only be used once.
-        abort_unless($codeData = Cache::pull("indieauth:code:$code"), 403, __('Unknown authorization code.'));
-
-        if ($request->has('code_verifier')) {
-            abort_unless(
-                static::isValidCode($request->input('code_verifier'), $codeData['code_challenge']),
-                419,
-                __('PKCE validation failed.')
-            );
-        }
-
-        $user = User::findOrFail($codeData['user_id']);
-
-        $response = ['me' => $user->url];
-
-        if (in_array('profile', (array) $codeData['scope'], true)) {
-            $response['profile'] = array_filter([
-                'name' => $user->name,
-                'url' => $user->url,
-                'photo' => null,
-                'email' => in_array('email', (array) $codeData['scope'], true) ? $user->email : null,
-            ]);
-        } elseif (in_array('email', (array) $codeData['scope'], true)) {
-            $response['email'] = [
-                'email' => $user->email,
-            ];
-        }
+        $response = static::generateResponse($request)[0];
 
         return response()->json($response);
     }
 
     public function issueToken(Request $request)
     {
-        abort_unless($request->filled('client_id'), 400, __('Missing client ID.'));
-        abort_unless($request->filled('redirect_uri'), 400, __('Missing redirect URI.'));
-        abort_unless($request->filled('code'), 401, __('Missing authorization code.'));
+        list($response, $codeData, $user) = static::generateResponse($request);
 
-        $code = preg_replace('/[^A-Za-z0-9]/', '', $request->input('code'));
-
-        // `Cache::pull()` would mean a code can only be used once.
-        abort_unless($codeData = Cache::pull("indieauth:code:$code"), 403, __('Unknown authorization code.'));
-
-        abort_unless($request->input('client_id') === $codeData['client_id'], 400, __('Invalid client ID.'));
-        abort_unless($request->input('redirect_uri') === $codeData['redirect_uri'], 400, __('Invalid redirect URI.'));
-
-        if ($request->has('code_verifier')) {
-            abort_unless(
-                static::isValidCode($request->input('code_verifier'), $codeData['code_challenge']),
-                419,
-                __('PKCE validation failed.')
-            );
-        }
-
-        $user = User::findOrFail($codeData['user_id']);
-
-        $response = [
-            'me' => $user->url,
-        ];
-
+        // Add in an actual auth token.
         if (array_diff($codeData['scope'], [null, 'profile', 'email'])) {
             $response['access_token'] = $user->createToken($codeData['client_id'], $codeData['scope'])->plainTextToken;
             $response['token_type'] = 'Bearer';
             $response['scope'] = implode(' ', $codeData['scope']);
-        }
-
-        if (in_array('profile', $codeData['scope'], true)) {
-            $response['profile'] = array_filter([
-                'name' => $user->name,
-                'url' => $user->url,
-                'photo' => null,
-                'email' => in_array('email', $codeData['scope'], true) ? $user->email : null,
-            ]);
-        } elseif (in_array('email', $codeData['scope'], true)) {
-            $response['email'] = [
-                'email' => $user->email,
-            ];
         }
 
         return response()->json($response);
@@ -290,5 +206,46 @@ class IndieAuthController
     public static function base64UrlEncode(string $string): string
     {
         return rtrim(strtr(base64_encode($string), '+/', '-_'), '=');
+    }
+
+    protected static function generateResponse(Request $request)
+    {
+        abort_unless($request->filled('code'), 401, __('Missing authorization code.'));
+        abort_unless($request->filled('client_id'), 400, __('Missing client ID.'));
+        abort_unless($request->filled('redirect_uri'), 400, __('Missing redirect URI.'));
+
+        $code = preg_replace('/[^A-Za-z0-9]/', '', $request->input('code'));
+
+        abort_unless($codeData = Cache::pull("indieauth:code:$code"), 403, __('Unknown authorization code.'));
+
+        abort_unless($request->input('client_id') === $codeData['client_id'], 400, __('Invalid client ID.'));
+        abort_unless($request->input('redirect_uri') === $codeData['redirect_uri'], 400, __('Invalid redirect URI.'));
+
+        if ($request->has('code_verifier')) {
+            abort_unless(
+                static::isValidCode($request->input('code_verifier'), $codeData['code_challenge']),
+                419,
+                __('PKCE validation failed.')
+            );
+        }
+
+        $user = User::findOrFail($codeData['user_id']);
+
+        $response = ['me' => $user->url];
+
+        if (in_array('profile', (array) $codeData['scope'], true)) {
+            $response['profile'] = array_filter([
+                'name' => $user->name,
+                'url' => $user->url,
+                'photo' => null,
+                'email' => in_array('email', (array) $codeData['scope'], true) ? $user->email : null,
+            ]);
+        } elseif (in_array('email', (array) $codeData['scope'], true)) {
+            $response['email'] = [
+                'email' => $user->email,
+            ];
+        }
+
+        return [$response, $codeData, $user];
     }
 }
