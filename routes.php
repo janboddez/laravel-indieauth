@@ -11,7 +11,7 @@ Route::prefix('indieauth')
         Route::middleware(['web', 'auth'])
             ->get('/', [IndieAuthController::class, 'start']);
 
-        Route::middleware(['web'])
+        Route::middleware('web')
             ->post('/', [IndieAuthController::class, 'approve']);
 
         Route::middleware('api')
