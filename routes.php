@@ -8,10 +8,11 @@ Route::prefix('indieauth')
         Route::middleware('web')
             ->get('/metadata', [IndieAuthController::class, 'metadata']);
 
-        Route::middleware(['web', 'auth'])->group(function () {
-            Route::get('/', [IndieAuthController::class, 'start']);
-            Route::post('/', [IndieAuthController::class, 'approve']);
-        });
+        Route::middleware(['web', 'auth'])
+            ->get('/', [IndieAuthController::class, 'start']);
+
+        Route::middleware(['web'])
+            ->post('/', [IndieAuthController::class, 'approve']);
 
         Route::middleware('api')
             ->post('/token', [IndieAuthController::class, 'issueToken']);
