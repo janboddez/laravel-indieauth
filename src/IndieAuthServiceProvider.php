@@ -13,12 +13,12 @@ class IndieAuthServiceProvider extends ServiceProvider
      */
     public function boot()
     {
-        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
-        $this->loadRoutesFrom(__DIR__.'/../routes.php');
-        $this->loadViewsFrom(__DIR__.'/../resources/views', 'indieauth');
- 
+        $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
+        $this->loadRoutesFrom(__DIR__ . '/../routes.php');
+        $this->loadViewsFrom(__DIR__ . '/../resources/views', 'indieauth');
+
         $this->publishes([
-            __DIR__.'/../resources/views' => resource_path('views/vendor/indieauth'),
+            __DIR__ . '/../resources/views' => resource_path('views/vendor/indieauth'),
         ]);
     }
 }
