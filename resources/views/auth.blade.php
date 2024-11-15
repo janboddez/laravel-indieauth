@@ -47,7 +47,7 @@
     }
 
     button[type="submit"] {
-           -moz-appearance: none;
+        -moz-appearance: none;
         -webkit-appearance: none;
         background-color: #48c78e;
         border: none;
@@ -73,15 +73,14 @@
             @endif
 
             @php
-                $client_description = session('client_id');
+                $client_description = e(session('client_id')); // This is a URL.
 
                 if (! empty($client['name'])) {
-                    $client_description = e(trim($client['name']));
+                    $client_description = e($client['name']); // The name we previously "discovered."
                 }
 
-                if (! empty($client['icon'])) {
-                    /** @todo: Run through proxy or otherwise verify this is a valid image. */
-                    $client_description = '<img class="client-icon" src="'.$client['icon'].'" height="16"> <strong>'.$client_description.'</strong>';
+                if (! empty($client['icon'])) { // A locally cached "logo."
+                    $client_description = '<img class="client-icon" src="' . $client['icon'] . '" height="16" alt=""> <strong>' . $client_description . '</strong>';
                 }
             @endphp
 
