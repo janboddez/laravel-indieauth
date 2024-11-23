@@ -5,12 +5,12 @@ namespace janboddez\IndieAuth\Http\Controllers;
 use App\Models\User;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\PersonalAccessToken;
+use Symfony\Component\HttpFoundation\Response;
 use janboddez\IndieAuth\ClientDiscovery;
 
 class IndieAuthController
@@ -89,7 +89,7 @@ class IndieAuthController
      * Unfortunately, this means the default CSRF middleware and `auth` middleware groups must be used only when no
      * `code` query string parameter is present.
      */
-    public function approve(Request $request): RedirectResponse
+    public function approve(Request $request): Response
     {
         if ($request->filled('code')) {
             return response()->json(static::generateResponse($request)[0]);
