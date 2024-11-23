@@ -5,6 +5,7 @@ namespace janboddez\IndieAuth;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Symfony\Component\DomCrawler\Crawler;
 
 class ClientDiscovery
@@ -131,15 +132,19 @@ class ClientDiscovery
             $imagick->cropThumbnailImage($size, $size);
             $imagick->setImagePage(0, 0, 0, 0);
 
-            // Save image.
-            Storage::disk('public')->put(
-                $relativeThumbnailPath,
-                $imagick->getImageBlob()
-            );
+            $image = $imagick->getImageBlob();
+
+            if ($image) {
+                // Save image.
+                Storage::disk('public')->put(
+                    $relativeThumbnailPath,
+                    $image
+                );
+            }
 
             $imagick->destroy();
 
-            if (! file_exists($fullThumbnailPath)) {
+            if (! $image || ! file_exists($fullThumbnailPath)) {
                 Log::error('[IndieAuth] Something went wrong saving the thumbnail');
                 return null;
             }
@@ -152,11 +157,15 @@ class ClientDiscovery
                 : null;
 
             if ($extension) {
+                // Rename.
                 Storage::disk('public')->move($relativeThumbnailPath, $relativeThumbnailPath . '.' . $extension);
+
+                // Return new local URL.
+                return Storage::disk('public')->url($relativeThumbnailPath . '.' . $extension);
             }
 
             // Return the local thumbnail URL.
-            return Storage::disk('public')->url($relativeThumbnailPath . '.' . $extension);
+            return Storage::disk('public')->url($relativeThumbnailPath);
         } catch (\Exception $exception) {
             Log::error('[IndieAuth] Something went wrong: ' . $exception->getMessage());
         }
@@ -166,6 +175,6 @@ class ClientDiscovery
 
     protected static function getRelativePath(string $absolutePath, string $disk = 'public'): string
     {
-        return preg_replace('~^' . Storage::disk($disk)->path('') . '~', '', $absolutePath);
+        return Str::replaceStart(Storage::disk($disk)->path(''), '', $absolutePath);
     }
 }

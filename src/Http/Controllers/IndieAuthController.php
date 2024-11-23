@@ -3,10 +3,14 @@
 namespace janboddez\IndieAuth\Http\Controllers;
 
 use App\Models\User;
+use Illuminate\Contracts\View\View;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
+use Laravel\Sanctum\PersonalAccessToken;
 use janboddez\IndieAuth\ClientDiscovery;
 
 class IndieAuthController
@@ -26,7 +30,7 @@ class IndieAuthController
         'block',
     ];
 
-    public function start(Request $request)
+    public function start(Request $request): View
     {
         abort_unless($request->filled('client_id'), 400, __('Missing client ID.'));
         abort_unless(
@@ -68,8 +72,6 @@ class IndieAuthController
             return $client;
         });
 
-        \Log::debug($client);
-
         session([
             'client_id' => $clientId, /** @todo: Store more than just the ID, to add to token meta. */
             'redirect_uri' => $request->input('redirect_uri'),
@@ -87,12 +89,10 @@ class IndieAuthController
      * Unfortunately, this means the default CSRF middleware and `auth` middleware groups must be used only when no
      * `code` query string parameter is present.
      */
-    public function approve(Request $request)
+    public function approve(Request $request): RedirectResponse
     {
         if ($request->filled('code')) {
-            $response = static::generateResponse($request)[0];
-
-            return response()->json($response);
+            return response()->json(static::generateResponse($request)[0]);
         }
 
         // In all other cases, assume this is the auth form being submitted. You'll want to make sure CSRF protection is
@@ -124,20 +124,27 @@ class IndieAuthController
         return redirect($callbackUrl);
     }
 
-    public function verifyAuthorizationCode(Request $request)
+    public function verifyAuthorizationCode(Request $request): JsonResponse
     {
         $response = static::generateResponse($request)[0];
 
         return response()->json($response);
     }
 
-    public function issueToken(Request $request)
+    public function issueToken(Request $request): JsonResponse
     {
+        if ($request->input('action') === 'revoke') {
+            return static::revokeToken();
+        }
+
         list($response, $codeData, $user) = static::generateResponse($request);
 
         // Add in an actual auth token.
         if (array_diff($codeData['scope'], [null, 'profile', 'email'])) {
-            $response['access_token'] = $user->createToken($codeData['client_id'], $codeData['scope'])->plainTextToken;
+            $token = $user->createToken($codeData['client_id'], $codeData['scope'])->plainTextToken;
+            [$id, $token] = explode('|', $token, 2); // The first part is the database ID; we don't need it.
+
+            $response['access_token'] = $token;
             $response['token_type'] = 'Bearer';
             $response['scope'] = implode(' ', $codeData['scope']);
         }
@@ -145,11 +152,10 @@ class IndieAuthController
         return response()->json($response);
     }
 
-    public function verifyToken(Request $request)
+    public function verifyToken(Request $request): JsonResponse
     {
-        // Sanctum actually allows logged in users to visit this route/URL, even
-        // if it's behind the `auth:sanctum` middleware. (That's because it
-        // tries good old cookie auth first.)
+        // Sanctum actually allows logged in users to visit this route/URL, even if it's behind the `auth:sanctum`
+        // middleware. (That's because it tries good old cookie auth first.)
         /** @todo: Look into removing Sanctum's `web` guard. */
         abort_unless($request->bearerToken(), 401, __('Missing bearer token.'));
 
@@ -170,17 +176,9 @@ class IndieAuthController
             ], 200);
     }
 
-    public function revokeToken(Request $request)
+    public function revoke(): JsonResponse
     {
-        // Same remark as above.
-        abort_unless($request->bearerToken(), 401, __('Missing bearer token.'));
-
-        $request->user()
-            ->currentAccessToken()
-            ->delete();
-
-        return response()
-            ->json(new \stdClass(), 200);
+        return static::revokeToken();
     }
 
     public function metadata()
@@ -208,7 +206,24 @@ class IndieAuthController
         return rtrim(strtr(base64_encode($string), '+/', '-_'), '=');
     }
 
-    protected static function generateResponse(Request $request)
+    protected static function revokeToken(): JsonResponse
+    {
+        if ($user = auth('sanctum')->user()) {
+            // User was authenticated using a Sanctum token.
+            $user->currentAccessToken()->delete();
+        }
+
+        // At least Quill doesn't use the Authorization header for token revocation, not sure about other clients. So we
+        // can't just have Sanctum protect this route.
+        if (request()->filled('token') && ($token = PersonalAccessToken::findToken(request()->input('token')))) {
+            $token->delete();
+        }
+
+        return response()
+            ->json(new \stdClass(), 200);
+    }
+
+    protected static function generateResponse(Request $request): array
     {
         abort_unless($request->filled('code'), 401, __('Missing authorization code.'));
         abort_unless($request->filled('client_id'), 400, __('Missing client ID.'));
