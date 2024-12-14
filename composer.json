@@ -8,6 +8,7 @@
         }
     },
     "require": {
+        "intervention/image": "^3.9",
         "laravel/framework": "^8|^9|^10|^11",
         "laravel/sanctum": "^2|^3|^4",
         "masterminds/html5": "^2.0",

@@ -6,6 +6,9 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Intervention\Image\ImageManager;
+use Intervention\Image\Drivers\Gd\Driver as GdDriver;
+use Intervention\Image\Drivers\Imagick\Driver as ImagickDriver;
 use Symfony\Component\DomCrawler\Crawler;
 
 class ClientDiscovery
@@ -15,7 +18,7 @@ class ClientDiscovery
      */
     public static function discoverClientData(string $url): ?array
     {
-        /** @todo: Set a proper user agent. */
+        /** @todo Set a proper (?) user agent. */
         $response = Http::get($url);
 
         if (! $response->successful()) {
@@ -23,12 +26,21 @@ class ClientDiscovery
             return null;
         }
 
+        /** @link https://indieauth.net/source/#client-metadata */
         if ($response->header('content-type') === 'application/json') {
             $data = $response->json();
+
+            $clientId = $data['client_id'] ?? null;
+            $clientUri = $data['client_uri'] ?? null;
+            /**
+             * @todo Verify that `client_id` the URL. `client_uri` MUST be a prefix of `client_id`. Warn the user if
+             *       the hostname of `client_uri` is different from the hostname of `client_id`.
+             */
+
             $name = $data['client_name'] ?? null;
             $logo = $data['logo_uri'] ?? null;
         } else {
-            // Look for microformats2 (i.e., `h-app`).
+            // Look for h-app microformats.
             $mf2 = \Mf2\parse((string) $response->getBody(), $url);
 
             if (! empty($mf2['items'][0]['type']) && in_array('h-app', (array) $mf2['items'][0]['type'], true)) {
@@ -49,7 +61,7 @@ class ClientDiscovery
             }
 
             if (empty($name)) {
-                // Parse the `title` element instead.
+                // If we got a JSON document nor h-app, parse the `title` element instead.
                 $crawler = new Crawler((string) $response->getBody());
                 $nodes = $crawler->filterXPath('//title');
                 if ($nodes->count() > 0) {
@@ -59,6 +71,7 @@ class ClientDiscovery
 
             if (empty($logo)) {
                 if (! $crawler) {
+                    // We may not yet have needed a `Crawler` instance. If so, initialize one.
                     $crawler = new Crawler((string) $response->getBody());
                 }
 
@@ -80,10 +93,9 @@ class ClientDiscovery
         }
 
         return array_filter([
-            'name' => ! empty($name) && is_string($name)
-                ? trim($name) // We should probably sanitize client names, even though we escape on output.
-                : null,
+            'name' => ! empty($name) && is_string($name) ? trim(strip_tags($name)) : null,
             'icon' => static::cacheThumbnail($logo ?? null),
+            'uri' => $clientUrl ?? $clientId ?? null, // Not actually used, yet.
         ]);
     }
 
@@ -92,7 +104,7 @@ class ClientDiscovery
      *
      * @todo This might be an ICO, or SVG, etc. file, which we may not support.
      */
-    protected static function cacheThumbnail(?string $thumbnailUrl, int $size = 150): ?string
+    protected static function cacheThumbnail(?string $thumbnailUrl, int $size = 150, $disk = 'public'): ?string
     {
         if (is_null($thumbnailUrl)) {
             return null;
@@ -101,18 +113,31 @@ class ClientDiscovery
         // Generate filename.
         $hash = md5($thumbnailUrl);
         $relativeThumbnailPath = 'indieauth-clients/' . substr($hash, 0, 2) . '/' . substr($hash, 2, 2) . '/' . $hash;
-        $fullThumbnailPath = Storage::disk('public')->path($relativeThumbnailPath);
+        $fullThumbnailPath = Storage::disk($disk)->path($relativeThumbnailPath);
 
-        // Look for existing files (without or with extension).
+        // Look for existing files (with or without extension).
         foreach (glob("$fullThumbnailPath.*") as $match) {
             if ((time() - filectime($match)) < 60 * 60 * 24 * 30) {
                 // Found one that's under a month old. Return its URL.
-                return Storage::disk('public')->url(static::getRelativePath($match));
+                return Storage::disk($disk)->url(static::getRelativePath($match));
             }
 
             break; // Stop after the first match.
         }
 
+        if (extension_loaded('imagick') && class_exists('Imagick')) {
+            // Using Imagick when we can.
+            $manager = new ImageManager(new ImagickDriver());
+        } elseif (extension_loaded('gd') && function_exists('gd_info')) {
+            // Fall back to GD if we have to.
+            $manager = new ImageManager(new GdDriver());
+        } else {
+            // No image driver found. Quit.
+            Log::error('[IndieAuth] Imagick nor GD installed');
+            return null;
+        }
+
+        // Download the image into memory.
         $response = Http::get($thumbnailUrl);
         if (! $response->successful()) {
             Log::error('[IndieAuth] Something went wrong fetching the image at ' . $thumbnailUrl);
@@ -125,52 +150,37 @@ class ClientDiscovery
             return null;
         }
 
-        try {
-            // Resize and crop.
-            $imagick = new \Imagick();
-            $imagick->readImageBlob($blob);
-            $imagick->cropThumbnailImage($size, $size);
-            $imagick->setImagePage(0, 0, 0, 0);
+        // Load image data and crop.
+        $image = $manager->read($blob);
+        $image->cover($size, $size);
 
-            $image = $imagick->getImageBlob();
-
-            if ($image) {
-                // Save image.
-                Storage::disk('public')->put(
-                    $relativeThumbnailPath,
-                    $image
-                );
-            }
-
-            $imagick->destroy();
-
-            if (! $image || ! file_exists($fullThumbnailPath)) {
-                Log::error('[IndieAuth] Something went wrong saving the thumbnail');
-                return null;
-            }
-
-            // Try and grab a meaningful file extension.
-            $finfo = new \finfo(FILEINFO_EXTENSION);
-            $extension = $finfo->file($fullThumbnailPath); // Returns string or `false`.
-            $extension = is_string($extension) && $extension !== '???'
-                ? explode('/', $extension)[0] // For types that have multiple possible extensions, return the first one.
-                : null;
-
-            if ($extension) {
-                // Rename.
-                Storage::disk('public')->move($relativeThumbnailPath, $relativeThumbnailPath . '.' . $extension);
-
-                // Return new local URL.
-                return Storage::disk('public')->url($relativeThumbnailPath . '.' . $extension);
-            }
-
-            // Return the local thumbnail URL.
-            return Storage::disk('public')->url($relativeThumbnailPath);
-        } catch (\Exception $exception) {
-            Log::error('[IndieAuth] Something went wrong: ' . $exception->getMessage());
+        if (! Storage::disk($disk)->has($dir = dirname($relativeThumbnailPath))) {
+            // Recursively create directory if it doesn't exist, yet.
+            Storage::disk($disk)->makeDirectory($dir);
         }
 
-        return null;
+        // Save image.
+        $image->save($fullThumbnailPath);
+
+        unset($image);
+
+        if (! Storage::disk($disk)->has($relativeThumbnailPath)) {
+            Log::warning('[IndieAuth] Something went wrong saving the thumbnail');
+            return null;
+        }
+
+        // Try and apply a meaningful file extension.
+        $finfo = new \finfo(FILEINFO_EXTENSION);
+        $extension = explode('/', $finfo->file($fullThumbnailPath))[0];
+        if (
+            ! empty($extension) &&
+            $extension !== '???' &&
+            Storage::disk($disk)->move($relativeThumbnailPath, $relativeThumbnailPath . ".$extension")
+        ) {
+            return Storage::disk($disk)->url($relativeThumbnailPath . ".$extension");
+        }
+
+        return Storage::disk($disk)->url($relativeThumbnailPath);
     }
 
     protected static function getRelativePath(string $absolutePath, string $disk = 'public'): string
