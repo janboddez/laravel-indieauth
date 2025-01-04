@@ -6,9 +6,9 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use Intervention\Image\ImageManager;
 use Intervention\Image\Drivers\Gd\Driver as GdDriver;
 use Intervention\Image\Drivers\Imagick\Driver as ImagickDriver;
+use Intervention\Image\ImageManager;
 use Symfony\Component\DomCrawler\Crawler;
 
 class ClientDiscovery
@@ -23,6 +23,7 @@ class ClientDiscovery
 
         if (! $response->successful()) {
             Log::warning('Could not fetch IndieAuth client data.');
+
             return null;
         }
 
@@ -53,7 +54,7 @@ class ClientDiscovery
 
                 if (
                     ! empty($mf2['items'][0]['properties']['logo'][0]['value']) &&
-                    filter_var($mf2['items'][0]['properties']['logo'][0]['value'], FILTER_VALIDATE_URL)
+                    Str::isUrl($mf2['items'][0]['properties']['logo'][0]['value'], ['http', 'https'])
                 ) {
                     // This should already be an absolute URL.
                     $logo = $mf2['items'][0]['properties']['logo'][0]['value'];
@@ -80,7 +81,7 @@ class ClientDiscovery
                 if ($nodes->count() > 0) {
                     $logo = $nodes->attr('href');
 
-                    if (filter_var($logo, FILTER_VALIDATE_URL)) {
+                    if (Str::isUrl($logo, ['http', 'https'])) {
                         // "Absolutize," then sanitize.
                         $logo = filter_var(\Mf2\resolveUrl(
                             $url,
@@ -134,6 +135,7 @@ class ClientDiscovery
         } else {
             // No image driver found. Quit.
             Log::error('[IndieAuth] Imagick nor GD installed');
+
             return null;
         }
 
@@ -141,12 +143,14 @@ class ClientDiscovery
         $response = Http::get($thumbnailUrl);
         if (! $response->successful()) {
             Log::error('[IndieAuth] Something went wrong fetching the image at ' . $thumbnailUrl);
+
             return null;
         }
 
         $blob = $response->body();
         if (empty($blob)) {
             Log::error('[IndieAuth] Missing image data');
+
             return null;
         }
 
@@ -166,6 +170,7 @@ class ClientDiscovery
 
         if (! Storage::disk($disk)->has($relativeThumbnailPath)) {
             Log::warning('[IndieAuth] Something went wrong saving the thumbnail');
+
             return null;
         }
 

@@ -9,9 +9,9 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
+use janboddez\IndieAuth\ClientDiscovery;
 use Laravel\Sanctum\PersonalAccessToken;
 use Symfony\Component\HttpFoundation\Response;
-use janboddez\IndieAuth\ClientDiscovery;
 
 class IndieAuthController
 {
@@ -34,14 +34,14 @@ class IndieAuthController
     {
         abort_unless($request->filled('client_id'), 400, __('Missing client ID.'));
         abort_unless(
-            filter_var($request->input('client_id'), FILTER_VALIDATE_URL),
+            Str::isUrl($request->input('client_id'), ['http', 'https']),
             400,
             __('Invalid client ID.')
         );
 
         abort_unless($request->filled('redirect_uri'), 400, __('Missing redirect URI.'));
         abort_unless(
-            filter_var($request->input('redirect_uri'), FILTER_VALIDATE_URL),
+            Str::isUrl($request->input('redirect_uri'), ['http', 'https']),
             400,
             __('Invalid redirect URI.')
         );
