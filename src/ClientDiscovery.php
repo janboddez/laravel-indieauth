@@ -154,19 +154,25 @@ class ClientDiscovery
             return null;
         }
 
-        // Load image data and crop.
-        $image = $manager->read($blob);
-        $image->cover($size, $size);
+        try {
+            // Load image data and crop.
+            $image = $manager->read($blob);
+            $image->cover($size, $size);
 
-        if (! Storage::disk($disk)->has($dir = dirname($relativeThumbnailPath))) {
-            // Recursively create directory if it doesn't exist, yet.
-            Storage::disk($disk)->makeDirectory($dir);
+            if (! Storage::disk($disk)->has($dir = dirname($relativeThumbnailPath))) {
+                // Recursively create directory if it doesn't exist, yet.
+                Storage::disk($disk)->makeDirectory($dir);
+            }
+
+            // Save image.
+            $image->save($fullThumbnailPath);
+
+            unset($image);
+        } catch (\Exception $e) {
+            Log::warning('[IndieAuth] Something went wrong: ' . $e->getMessage());
+
+            return null;
         }
-
-        // Save image.
-        $image->save($fullThumbnailPath);
-
-        unset($image);
 
         if (! Storage::disk($disk)->has($relativeThumbnailPath)) {
             Log::warning('[IndieAuth] Something went wrong saving the thumbnail');

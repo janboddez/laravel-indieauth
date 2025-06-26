@@ -9,7 +9,7 @@
     },
     "require": {
         "intervention/image": "^3.9",
-        "laravel/framework": "^8|^9|^10|^11",
+        "laravel/framework": "^8|^9|^10|^11|^12",
         "laravel/sanctum": "^2|^3|^4",
         "masterminds/html5": "^2.0",
         "mf2/mf2": "^0.5",
